@@ -1,0 +1,19 @@
+# --- Secrets / credentials ---
+.api-key
+*.key
+*.pem
+.env
+.env.*
+
+# --- Local / private artifacts ---
+EngramHalo.cpp
+pi-session-*.html
+
+# --- Python ---
+__pycache__
+*.pyc
+*.pyo
+
+# --- Benchmark output (server cmd lines, logs, host/hardware info) ---
+benchmarks/
+*.log
