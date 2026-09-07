@@ -65,4 +65,6 @@ ENV GGML_VK_DISABLE_GDN_CACHE_FUSION=1
 ENV VK_LOADER_DEBUG=error
 
 EXPOSE 8080
-ENTRYPOINT ["llama-server"]
+# No ENTRYPOINT: the Compose profiles spell the full command line, starting
+# with llama-server itself, so an entrypoint would end up as the first argument.
+CMD ["llama-server", "--help"]
