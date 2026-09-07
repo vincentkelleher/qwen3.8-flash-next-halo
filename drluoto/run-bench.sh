@@ -55,10 +55,12 @@ if [[ "${ready:-0}" != 1 ]]; then
   exit 1
 fi
 
-# On a unified-memory host MemAvailable is the combined GPU + system figure.
-printf 'ts,mem_available_kib\n' > "$OUT_DIR/memory.csv"
+# memory used = MemTotal - MemAvailable. On a unified-memory board this is the
+# combined GPU + system figure, which is what the README numbers quote.
+printf 'ts,mem_used_kib\n' > "$OUT_DIR/memory.csv"
 while :; do
-  awk '/^MemAvailable:/ { printf "%s,%s\n", strftime("%s"), $2 }' /proc/meminfo >> "$OUT_DIR/memory.csv"
+  awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { printf "%s,%d\n", strftime("%s"), t - $2 }' \
+    /proc/meminfo >> "$OUT_DIR/memory.csv"
   sleep "$INTERVAL"
 done &
 SAMPLER=$!
@@ -70,9 +72,9 @@ docker compose --profile "$PROFILE" exec -T "$SVC" \
 kill "$SAMPLER" 2>/dev/null || true
 trap - EXIT
 
-awk -F, 'NR > 1 { s += $2; n++; if (min == "" || $2 < min) min = $2 }
+awk -F, 'NR > 1 { s += $2; n++; if (max == "" || $2 > max) max = $2 }
          END {
-           if (n) printf "\nmemory available: mean %.2f GiB, min %.2f GiB over %d samples\n",
-                     s/n/1048576, min/1048576, n
+           if (n) printf "\nmemory used: mean %.2f GiB, peak %.2f GiB over %d samples\n",
+                     s/n/1048576, max/1048576, n
          }' "$OUT_DIR/memory.csv"
 echo "Logs: $OUT_DIR"

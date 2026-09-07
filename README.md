@@ -137,12 +137,13 @@ docker compose down                     # stop
 
 The MTP head this profile serves —
 [`drluoto/Qwen3.8-Flash-Next-MTP-GGUF`](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
-— is an FR-Spec draft: its output vocabulary is trimmed to the 65,536 most
-frequent tokens with a `d2t` map back to real ids, and only
+— is an FR-Spec draft: its output vocabulary is trimmed to 65,536
+frequency-ranked rows with a `d2t` map back to real token ids, and only
 [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`
 reads that layout. Neither EngramHalo.cpp nor stock llama.cpp can load it, so
 this profile does not use the `EngramHalo.cpp` build context at all — it builds
-its own image from `drluoto/Dockerfile`, pinned to `ba5354d46`.
+its own image from `drluoto/Dockerfile`, pinned to `ba5354d46`. Upstream puts it
+plainly: the draft head "needs this branch; stock llama.cpp will not load it".
 
 ```sh
 docker compose --profile drluoto up -d --build
@@ -182,7 +183,8 @@ The same shards without a draft head decoded at 28.28 tokens/s
 (`llama-bench`, tg128), so MTP is worth about 1.1x to 2.0x here: it pays when
 the output is structured or copied, and prose barely clears the verification
 cost. Memory across the run averaged 109.15 GiB and peaked at 118.32 GiB
-(`MemAvailable`, a combined CPU+GPU figure on a unified-memory board).
+(`MemTotal - MemAvailable`, a combined CPU+GPU figure on this unified-memory
+board).
 
 `./drluoto/run-bench.sh` replays the same suite against the container; the
 container itself has not been timed separately from the host run.
@@ -200,7 +202,17 @@ container itself has not been timed separately from the host run.
   (128 GB, NVMe, CPU governor `powersave`). Retune before trusting the numbers
   elsewhere.
 - `benchmarks/` and `EngramHalo.cpp/` are gitignored, so a fresh clone needs
-  step 1 above before any compose command will build.
+  step 1 above before any compose command will build. The `drluoto` profile is
+  the exception: it clones its engine inside the image and needs nothing on
+  disk but the weights.
+- The `drluoto` profile pins a fork commit (`ba5354d46`), not the EngramHalo
+  engine, and it is the only place the FR-Spec draft head loads. Two flags are
+  load-bearing there: `GGML_VK_DISABLE_GDN_CACHE_FUSION=1` sidesteps a fused
+  state-cache kernel that corrupts output on the 8060S, and `-lm dio` wants a
+  filesystem with `O_DIRECT` (local ext4/NVMe — not a network mount).
+- The `drluoto` profile serves unauthenticated on `127.0.0.1:8081` because that
+  is how the benchmark was run. Do not republish it on a LAN address without
+  adding `--api-key-file`.
 
 ## Acknowledgements
 
