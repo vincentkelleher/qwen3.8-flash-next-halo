@@ -5,7 +5,7 @@
 #   precheck   tools, docker, /dev/kfd, kernel args, free disk
 #   clone      EngramHalo.cpp — the build context for the compose images
 #   key        create ./.api-key (0600)
-#   weights    IQ4_XS model + MTP draft head + mmproj   (~100 GB)
+#   weights    IQ4_XS model + MTP draft heads + mmproj  (~100 GB)
 #   verify     every file against the sizes Hugging Face reports
 #
 #   ./setup.sh                      # everything; asks before the big download
@@ -35,6 +35,9 @@ GIT_BRANCH="strix-halo-qwen4exp"
 HF_MAIN="unsloth/Qwen3.8-Flash-Next-GGUF"
 HF_MTP="EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF"
 MTP_FILE="mtp-Qwen3.8-Flash-Next-Q8_0.gguf"
+# FR-Spec MTP head used by the --profile drluoto benchmark (drluoto/llama.cpp).
+HF_MTP_FR="drluoto/Qwen3.8-Flash-Next-MTP-GGUF"
+MTP_FR_FILE="mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf"
 MMPROJ_FILE="mmproj-BF16.gguf"
 QUANT="UD-IQ4_XS"
 MODELS_DIR="${HOME}/Models"
@@ -209,6 +212,8 @@ build_manifest() {
   awk -F'\t' -v r="$HF_MAIN" -v f="$MMPROJ_FILE" '$2 == f { print $1 "\t" r "\t" $2 }' "${WORK}/root.tsv" >> "$MANIFEST"
   hf_tree "$HF_MTP" "" > "${WORK}/mtp.tsv" || true
   awk -F'\t' -v r="$HF_MTP" -v f="$MTP_FILE" '$2 == f { print $1 "\t" r "\t" $2 }' "${WORK}/mtp.tsv" >> "$MANIFEST"
+  hf_tree "$HF_MTP_FR" "" > "${WORK}/mtp-fr.tsv" || true
+  awk -F'\t' -v r="$HF_MTP_FR" -v f="$MTP_FR_FILE" '$2 == f { print $1 "\t" r "\t" $2 }' "${WORK}/mtp-fr.tsv" >> "$MANIFEST"
   [[ -s "$MANIFEST" ]] || die "could not read the file list for ${HF_MAIN} (${QUANT})"
   MANIFEST_TOTAL=$(awk -F'\t' '{ s += $1 } END { print s + 0 }' "$MANIFEST")
   ok "$(awk 'END { print NR }' "$MANIFEST") files expected, $(human "$MANIFEST_TOTAL")"

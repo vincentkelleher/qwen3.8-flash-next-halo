@@ -17,6 +17,7 @@ weights, and the benchmark scripts. The engine itself lives upstream.
 |---|---|
 | `docker-compose.yaml` | Three `llama-server` profiles: `long` (ROCm, 128K), `fast`, `vulkan` |
 | `EngramHalo.cpp/` | Clone of the tuned llama.cpp branch — build context for the images (gitignored) |
+| `drluoto/` | Vulkan image for [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`, plus the MTP workload replay |
 | `benchmarks/` | `perfbench.py` and the A/B test plan (gitignored) |
 | `.api-key` | Server API key, mounted read-only as a compose secret (gitignored) |
 
@@ -73,6 +74,11 @@ hf download EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF \
   mtp-Qwen3.8-Flash-Next-Q8_0.gguf \
   --local-dir EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF
 
+# FR-Spec MTP head, only needed for the `drluoto` profile (3.64 GB)
+hf download drluoto/Qwen3.8-Flash-Next-MTP-GGUF \
+  mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf \
+  --local-dir drluoto/Qwen3.8-Flash-Next-MTP-GGUF
+
 # vision head
 hf download unsloth/Qwen3.8-Flash-Next-GGUF \
   mmproj-BF16.gguf \
@@ -84,6 +90,7 @@ Expected result:
 ```text
 ~/Models
 ├── EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
+├── drluoto/Qwen3.8-Flash-Next-MTP-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf
 └── unsloth/Qwen3.8-Flash-Next-GGUF
     ├── mmproj-BF16.gguf
     └── UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-0000{1,2,3}-of-00003.gguf
@@ -126,31 +133,59 @@ docker compose --profile vulkan up -d   # Vulkan/RADV build
 docker compose down                     # stop
 ```
 
-## Benchmarks
+## The MTP benchmark profile
 
-Measured on the configured AMD Radeon 8060S / Ryzen AI MAX+ 395 host using the
-ROCm Docker image (`engramhalo:qwen38-flash-rocm-7.14`, build `68c3a4fc4`).
-The benchmark was run after stopping the live server to avoid competing for
-unified memory, then the `long` Compose profile was restarted:
+The MTP head this profile serves —
+[`drluoto/Qwen3.8-Flash-Next-MTP-GGUF`](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
+— is an FR-Spec draft: its output vocabulary is trimmed to the 65,536 most
+frequent tokens with a `d2t` map back to real ids, and only
+[drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`
+reads that layout. Neither EngramHalo.cpp nor stock llama.cpp can load it, so
+this profile does not use the `EngramHalo.cpp` build context at all — it builds
+its own image from `drluoto/Dockerfile`, pinned to `ba5354d46`.
 
 ```sh
-./run-llama-bench.sh --stop-server
+docker compose --profile drluoto up -d --build
+curl -s http://127.0.0.1:8081/health
 ```
 
-`llama-bench` loaded the same IQ4_XS three-shard model with `-ngl 999`, lazy
-mmap loading, Flash Attention, Q8 K/V cache, 8192 batch / 2048 microbatch, and
-4 CPU threads. Each test was repeated three times.
+This profile is the benchmark configuration, not a production tuning: MTP only
+(`--spec-type draft-mtp`), three draft tokens, no draft probability floor,
+full-precision F16 K/V, 262,144-token context across three slots, and
+`-lm dio`. It listens on `127.0.0.1:8081` without an API key, so replaying the
+workloads needs no extra header; add `--api-key-file` before exposing it.
 
-| Test | Average |
-|---|---:|
-| Prompt processing, 512 tokens | 387.0 tokens/s |
-| Prompt processing, 2,048 tokens | 490.4 tokens/s |
-| Prompt processing, 8,192 tokens | 483.1 tokens/s |
-| Generation, 128 tokens | 22.49 tokens/s |
+Reproduce the measurement with the workload replay baked into the image:
 
-These are base `llama-bench` prompt-processing and generation measurements;
-they do not include the server's MTP / n-gram speculative-decoding path,
-vision head, HTTP overhead, or the effect of `--parallel 2`.
+```sh
+./drluoto/run-bench.sh        # six workloads, plus memory sampling
+```
+
+## MTP results
+
+One pass of the six-workload replay against the profile flags, on a host build
+of `ba5354d46` (Vulkan, Mesa 26.2.1, `GGML_VK_DISABLE_GDN_CACHE_FUSION=1`),
+greedy sampling, `cache_prompt: false`. These are server-reported timings, not
+repeated runs. Acceptance counts accepted draft tokens over drafted tokens;
+`--spec-draft-p-min 0.0` puts no probability floor under a draft.
+
+| Workload | Prompt tokens | Prefill | Decode | Tokens/step | Acceptance |
+|---|---:|---:|---:|---:|---:|
+| short code @0 | 39 | 103.0 | 55.8 | 3.66 | 0.90 |
+| new code @8k | 8,210 | 565.2 | 50.1 | 3.53 | 0.85 |
+| prose @8k | 8,221 | 558.0 | 31.2 | 2.20 | 0.40 |
+| file rewrite @8k | 8,362 | 531.1 | 52.4 | 3.97 | 1.00 |
+| new code @32k | 32,763 | 430.8 | 35.8 | 2.89 | 0.64 |
+| file rewrite @32k | 32,314 | 446.3 | 48.0 | 3.97 | 1.00 |
+
+The same shards without a draft head decoded at 28.28 tokens/s
+(`llama-bench`, tg128), so MTP is worth about 1.1x to 2.0x here: it pays when
+the output is structured or copied, and prose barely clears the verification
+cost. Memory across the run averaged 109.15 GiB and peaked at 118.32 GiB
+(`MemAvailable`, a combined CPU+GPU figure on a unified-memory board).
+
+`./drluoto/run-bench.sh` replays the same suite against the container; the
+container itself has not been timed separately from the host run.
 
 ## Notes and limitations
 

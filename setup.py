@@ -6,7 +6,7 @@ Runs the "Setting up" section of README.md, with progress bars:
   1. precheck  tools, docker, /dev/kfd, kernel args, free disk
   2. clone     EngramHalo.cpp — the build context for the images
   3. key       create ./.api-key (0600)
-  4. weights   IQ4_XS model, MTP draft head, mmproj  (~100 GB)
+  4. weights   IQ4_XS model, MTP draft heads, mmproj  (~100 GB)
   5. verify    every file against the sizes Hugging Face reports
 
   ./setup.py                      # everything; asks before the big download
@@ -44,6 +44,9 @@ GIT_BRANCH = "strix-halo-qwen4exp"
 REPO_MAIN = "unsloth/Qwen3.8-Flash-Next-GGUF"
 REPO_MTP = "EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF"
 MTP_FILE = "mtp-Qwen3.8-Flash-Next-Q8_0.gguf"
+# FR-Spec MTP head used by the --profile drluoto benchmark (drluoto/llama.cpp).
+REPO_MTP_FR = "drluoto/Qwen3.8-Flash-Next-MTP-GGUF"
+MTP_FR_FILE = "mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf"
 MMPROJ_FILE = "mmproj-BF16.gguf"
 KERNEL_ARGS = ("amd_iommu=off", "amdgpu.gttsize=", "ttm.pages_limit=")
 STEP_NAMES = ("clone", "key", "weights")
@@ -200,10 +203,11 @@ def build_manifest(models_dir, quant):
     wanted = [
         (REPO_MAIN, main_files),
         (REPO_MTP, [MTP_FILE]),
+        (REPO_MTP_FR, [MTP_FR_FILE]),
         (REPO_MAIN, [MMPROJ_FILE]),
     ]
     total_files = sum(len(names) for _, names in wanted for n in [names])
-    bar = Bar("resolving sizes", max(len(main_files) + 2, 1))
+    bar = Bar("resolving sizes", max(len(main_files) + 3, 1))
     manifest, i = [], 0
     for repo, names in wanted:
         for name in names:
