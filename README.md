@@ -126,6 +126,32 @@ docker compose --profile vulkan up -d   # Vulkan/RADV build
 docker compose down                     # stop
 ```
 
+## Benchmarks
+
+Measured on the configured AMD Radeon 8060S / Ryzen AI MAX+ 395 host using the
+ROCm Docker image (`engramhalo:qwen38-flash-rocm-7.14`, build `68c3a4fc4`).
+The benchmark was run after stopping the live server to avoid competing for
+unified memory, then the `long` Compose profile was restarted:
+
+```sh
+./run-llama-bench.sh --stop-server
+```
+
+`llama-bench` loaded the same IQ4_XS three-shard model with `-ngl 999`, lazy
+mmap loading, Flash Attention, Q8 K/V cache, 8192 batch / 2048 microbatch, and
+4 CPU threads. Each test was repeated three times.
+
+| Test | Average |
+|---|---:|
+| Prompt processing, 512 tokens | 387.0 tokens/s |
+| Prompt processing, 2,048 tokens | 490.4 tokens/s |
+| Prompt processing, 8,192 tokens | 483.1 tokens/s |
+| Generation, 128 tokens | 22.49 tokens/s |
+
+These are base `llama-bench` prompt-processing and generation measurements;
+they do not include the server's MTP / n-gram speculative-decoding path,
+vision head, HTTP overhead, or the effect of `--parallel 2`.
+
 ## Notes and limitations
 
 - Tuned and measured on ROCm/HIP only. The upstream docs report the Vulkan

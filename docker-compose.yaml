@@ -92,9 +92,9 @@ services:
       - -lm
       - mmap
 
-      # 128K context
+      # 128K context on two slots
       - -c
-      - "131072"
+      - "262144"
 
       # EngramHalo recommended batching
       - -b
@@ -195,9 +195,9 @@ services:
       - -lm
       - mmap
 
-      # 128K context
+      # 128K context on two slots
       - -c
-      - "131072"
+      - "262144"
 
       # EngramHalo recommended batching
       - -b
@@ -289,8 +289,9 @@ services:
       - -lm
       - none
 
+      # 32k context on two slots
       - -c
-      - "32768"
+      - "65536"
 
       - -b
       - "8192"
