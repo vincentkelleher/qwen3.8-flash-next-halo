@@ -23,7 +23,6 @@ the GGUFs needs to sit on disk.
 | `docker-compose.yaml` | The default `qwen-drluoto-mtp` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
 | `banner.png` | Repo banner |
 | `drluoto/Dockerfile` | Image for `drluoto/llama.cpp` `strix-halo-vulkan`, pinned to `ba5354d46` |
-| `EngramHalo.cpp/` | Upstream Strix Halo clone, kept for its tuning docs (gitignored, no longer a build context) |
 
 ## Why this branch
 
