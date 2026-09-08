@@ -23,6 +23,30 @@ the GGUFs needs to sit on disk.
 | `docker-compose.yaml` | The default `qwen-drluoto-mtp` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
 | `banner.png` | Repo banner |
 | `drluoto/Dockerfile` | Image for `drluoto/llama.cpp` `strix-halo-vulkan`, pinned to `ba5354d46` |
+| `benchmarks/` | `llama-benchy` report and raw result files for this service |
+
+## Benchmarks
+
+Single-request throughput measured with
+[`llama-benchy`](https://github.com/eugr/llama-benchy) against the running
+service (2,048-token prompts, 128 tokens generated, uncached prefill). The
+service runs with MTP speculative decoding on, so the generation numbers here
+are the MTP path, not a draft-off baseline. Decoding stays around 40 t/s at
+short context and about 25 t/s at 128K; prompt processing is the weak point and
+falls from 573.7 t/s to 231.0 t/s as the context grows.
+
+| Context depth | Prompt processing (t/s) | Generation (t/s) | First response (s) |
+|---:|---:|---:|---:|
+| 0 | 573.7 ± 4.1 | 40.8 ± 1.9 | 3.70 ± 0.03 |
+| 8,192 | 508.0 ± 1.7 | 43.3 ± 2.9 | 20.29 ± 0.07 |
+| 32,768 | 408.3 ± 0.4 | 37.7 ± 1.3 | 85.40 ± 0.09 |
+| 128,000 | 231.0 ± 0.3 | 25.5 ± 2.0 | 563.18 ± 0.72 |
+
+Values are mean ± std over three runs. `First response` is `ttfr` from
+llama-benchy: time until the first stream chunk, prompt processing included.
+Full tables (every depth measured, plus two concurrent requests), raw
+`llama-benchy` output and the exact command lines:
+[`benchmarks/`](benchmarks/).
 
 ## Why this branch
 
@@ -190,6 +214,60 @@ What `docker-compose.yaml` starts, minus the paths:
 
 </details>
 
+## Benchmark details
+
+Measured on this box with `llama-benchy` 0.4.0 against the
+running service: 2,048-token prompts, 128 tokens generated, three runs per
+shape, `--latency-mode generation`, `--no-cache` (uncached prefill every run).
+The service runs with `--spec-type draft-mtp`: every number below is with MTP
+speculative decoding on, and llama-benchy handles the multi-token chunks that
+head produces, counting a burst as the tokens it carries. Values are mean ±
+std. `llama-benchy` talks to `/v1/chat/completions`, so this is end-to-end
+server throughput, not `llama-bench` internals. "First response"
+is `ttfr`: time until the first stream chunk arrives, prompt processing
+included.
+
+Concurrency 1 — a single request owns the model:
+
+| Context depth | Prompt processing (t/s) | Generation (t/s) | Peak generation (t/s) | First response (s) |
+|---:|---:|---:|---:|---:|
+| 0 | 573.7 ± 4.1 | 40.8 ± 1.9 | 41.7 ± 1.9 | 3.70 ± 0.03 |
+| 4,096 | 527.3 ± 7.0 | 39.4 ± 3.5 | 39.7 ± 3.7 | 11.79 ± 0.15 |
+| 8,192 | 508.0 ± 1.7 | 43.3 ± 2.9 | 43.7 ± 2.6 | 20.29 ± 0.07 |
+| 16,384 | 469.3 ± 0.8 | 41.0 ± 2.0 | 41.3 ± 1.7 | 39.41 ± 0.06 |
+| 32,768 | 408.3 ± 0.4 | 37.7 ± 1.3 | 38.3 ± 1.3 | 85.40 ± 0.09 |
+| 65,536 | 324.7 ± 0.9 | 31.7 ± 1.1 | 32.3 ± 0.9 | 208.25 ± 0.57 |
+| 98,304 | 267.3 ± 1.8 | 27.4 ± 1.6 | 27.7 ± 1.7 | 375.58 ± 2.48 |
+| 128,000 | 231.0 ± 0.3 | 25.5 ± 2.0 | 26.0 ± 2.2 | 563.18 ± 0.72 |
+
+Concurrency 2 — two simultaneous requests, `--parallel 2`. Throughput is
+reported as aggregate across both requests / average per request:
+
+| Context depth | Prompt processing (t/s) | Generation (t/s) | First response (s) |
+|---:|---:|---:|---:|
+| 0 | 538.5 ± 1.5 / 281.6 ± 3.9 | 43.1 ± 2.5 / 23.7 ± 2.3 | 7.51 ± 0.10 |
+| 4,096 | 518.0 ± 0.5 / 292.2 ± 30.6 | 25.8 ± 0.8 / 19.0 ± 5.9 | 21.50 ± 2.23 |
+| 8,192 | 502.7 ± 1.4 / 313.8 ± 61.0 | 13.7 ± 0.4 / 15.8 ± 9.0 | 34.15 ± 6.59 |
+| 16,384 | 466.6 ± 0.4 / 315.4 ± 81.4 | 6.7 ± 0.1 / 12.8 ± 9.5 | 62.85 ± 16.16 |
+| 32,768 | 411.4 ± 0.8 / 290.9 ± 84.9 | 3.1 ± 0.0 / 12.0 ± 10.5 | 131.08 ± 38.18 |
+
+What the numbers say:
+
+- Decoding holds around 40 t/s at short context and falls to ~25 t/s at 128K.
+  The server's own log lines report `draft acceptance` around 0.5 on the
+  benchmark text (e.g. `0.51667 (62 accepted / 120 generated), mean len = 2.55`).
+- Uncached prefill is the hard part on this GPU: a cold 128K prompt takes
+  almost ten minutes to process. Keep the prefix cache on (the default) and
+  keep sessions warm; these measurements deliberately disable it.
+- Two slots share the compute, so interactive concurrency is only comfortable
+  at short contexts. Both slots going deep degrades decode badly.
+- The 128K depth fits because `--parallel 2` gives each slot ~132,000 tokens.
+  At depth 128,000 the prompt plus output leaves little headroom; for full
+  native-context work set `--parallel 1`.
+
+Raw runs, the exact `llama-benchy` command lines and the full argument list
+are in [`benchmarks/REPORT.md`](benchmarks/REPORT.md).
+
 ## Notes and limitations
 
 - The service publishes `0.0.0.0:8080:8080` and binds `--host 0.0.0.0`, so it
@@ -220,10 +298,11 @@ What `docker-compose.yaml` starts, minus the paths:
   profiles that used the [EngramHalo.cpp](https://github.com/Aristo94/EngramHalo.cpp)
   engine were removed; upstream reports the Vulkan path as a net loss against a
   stock build on RADV, and this branch has not been compared against ROCm here.
-- No timing numbers here, and no tooling to produce them:
-  `drluoto/run-bench.sh`, the image's `/opt/bench/spektrum.py` replay and the
-  `llama-bench` build target are gone. The flags come from the fork and from
-  one host pass on this box — measure your own before trusting them elsewhere.
+- The fork's own timing tooling is gone: `drluoto/run-bench.sh`, the image's
+  `/opt/bench/spektrum.py` replay and the `llama-bench` build target are not in
+  the image. The numbers above come from `llama-benchy` against the HTTP API on
+  this box — the flags themselves come from the fork and one host pass, so
+  measure your own before trusting them elsewhere.
 - Server-side sampling defaults are the template's recommended `temperature`
   1.0, `top-k` 20, `top-p` 0.95, `min-p` 0.0 and `presence-penalty` 0.0. Pin
   `temperature: 0` per request for greedy.
