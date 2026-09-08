@@ -288,6 +288,15 @@ services:
       - -md
       - /models/drluoto/Qwen3.8-Flash-Next-MTP-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf
 
+      # Vision head, same file the EngramHalo profiles use: a Qwen3-VL ViT
+      # (clip.projector_type = qwen3vl_merger). NOT part of the measured run
+      # below, and unverified on this fork: the MTP workloads are text-only and
+      # nothing in this branch's tools/mtmd mentions the qwen4exp arch. If the
+      # server dies on "model does not support vision input", drop these two
+      # lines and the profile is the benchmark again.
+      - --mmproj
+      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
+
       # MTP speculative decoding: draft the next 3 tokens, accept all of them.
       # p-min 0.0 is what the sidecar was measured with - its draft logits are
       # uncalibrated, so any threshold throws away acceptance for nothing.

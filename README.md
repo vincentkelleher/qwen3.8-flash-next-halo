@@ -150,10 +150,18 @@ docker compose --profile drluoto up -d --build
 curl -s http://127.0.0.1:8081/health
 ```
 
-This profile is the benchmark configuration, not a production tuning: MTP only
-(`--spec-type draft-mtp`), three draft tokens, no draft probability floor,
-full-precision F16 K/V, 262,144-token context across three slots, and
-`-lm dio`. It listens on `127.0.0.1:8081` without an API key, so replaying the
+It also loads the vision projector the other profiles use —
+`mmproj-BF16.gguf`, a Qwen3-VL ViT with a `qwen3vl_merger` head — although the
+benchmark below is text-only and vision on this fork is unproven: nothing under
+`tools/mtmd` of `strix-halo-vulkan` mentions the `qwen4exp` architecture, so
+expect `model does not support vision input` if the branch cannot pair the
+projector with this model. Delete those two lines and the profile is the
+benchmark configuration again.
+
+This profile is otherwise the benchmark configuration, not a production
+tuning: MTP only (`--spec-type draft-mtp`), three draft tokens, no draft
+probability floor, full-precision F16 K/V, 262,144-token context across three
+slots, and `-lm dio`. It listens on `127.0.0.1:8081` without an API key, so replaying the
 workloads needs no extra header; add `--api-key-file` before exposing it.
 
 Reproduce the measurement with the workload replay baked into the image:
@@ -186,8 +194,10 @@ cost. Memory across the run averaged 109.15 GiB and peaked at 118.32 GiB
 (`MemTotal - MemAvailable`, a combined CPU+GPU figure on this unified-memory
 board).
 
-`./drluoto/run-bench.sh` replays the same suite against the container; the
-container itself has not been timed separately from the host run.
+`./drluoto/run-bench.sh` replays the same suite against the container. Two
+caveats when you do: the profile also mounts the vision projector, which the
+measured run did not, and the container itself has not been timed against the
+host run.
 
 ## Notes and limitations
 
