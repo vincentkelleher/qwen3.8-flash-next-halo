@@ -1,5 +1,7 @@
 # Qwen 3.8 Flash-Next on Strix Halo
 
+![Qwen3.8 Flash Next banner with the Qwen bear and a Framework Desktop](./banner.png)
+
 Docker Compose setup for the Qwen 3.8 Flash-Next MTP service on an AMD Strix
 Halo box (Ryzen AI MAX+ 395 / Radeon 8060S). It serves
 [`drluoto/Qwen3.8-Flash-Next-MTP-GGUF`](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
@@ -19,6 +21,7 @@ the GGUFs needs to sit on disk.
 | Path | What it does |
 |---|---|
 | `docker-compose.yaml` | The default `qwen-drluoto-mtp` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
+| `banner.png` | Repo banner |
 | `drluoto/Dockerfile` | Image for `drluoto/llama.cpp` `strix-halo-vulkan`, pinned to `ba5354d46` |
 | `EngramHalo.cpp/` | Upstream Strix Halo clone, kept for its tuning docs (gitignored, no longer a build context) |
 
