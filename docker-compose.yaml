@@ -1,13 +1,15 @@
 name: qwen38-flash-next
 
 # =============================================================================
-# Qwen 3.8 Flash-Next — MTP profile (drluoto/llama.cpp, Vulkan/RADV)
+# Qwen 3.8 Flash-Next — MTP service (drluoto/llama.cpp, Vulkan/RADV)
 #
 # Container for the MTP configuration validated on this box: the drluoto
 # `strix-halo-vulkan` branch (pinned in drluoto/Dockerfile), the FR-Spec
 # MTP-only draft head, and the server flags that validation run used.
 #
-#   docker compose --profile drluoto up -d --build
+# It is the default service — no profile flag needed:
+#
+#   docker compose up -d --build
 #   curl -s http://127.0.0.1:8080/health
 # =============================================================================
 
@@ -16,7 +18,7 @@ services:
   qwen-drluoto-mtp:
 
     # --- Image ---------------------------------------------------------------
-    # This profile builds its own image and needs nothing on disk but the
+    # This service builds its own image and needs nothing on disk but the
     # weights: the engine is cloned inside the build, pinned to ba5354d46.
     # Only the drluoto/llama.cpp fork reads the FR-Spec draft head.
     build:
@@ -24,8 +26,8 @@ services:
       dockerfile: Dockerfile
     image: drluoto-llamacpp:strix-halo-vulkan
 
-    profiles:
-      - drluoto
+    # No `profiles:` key: this is the default service, so plain
+    # `docker compose up` starts it.
 
     restart: unless-stopped
 
@@ -41,11 +43,11 @@ services:
 
     environment:
       # This branch's fused GDN state-cache path is broken on the 8060S and
-      # corrupts output. This profile runs with the fusion disabled.
+      # corrupts output. This service runs with the fusion disabled.
       GGML_VK_DISABLE_GDN_CACHE_FUSION: "1"
 
     volumes:
-      # IMPORTANT: ~/Models should live on your fastest NVMe — this profile
+      # IMPORTANT: ~/Models should live on your fastest NVMe — this service
       # loads with -lm dio (O_DIRECT), so it needs a local filesystem.
       - ~/Models:/models:ro
 
@@ -79,7 +81,7 @@ services:
       # Vision head — NOT part of the validated configuration and unverified here:
       # the MTP workloads are text-only and nothing in this branch's tools/mtmd
       # mentions the qwen4exp arch. If the server dies on "model does not
-      # support vision input", drop these two lines and the profile is exactly
+      # support vision input", drop these two lines and the service is exactly
       # the plain text-only configuration again.
       - --mmproj
       - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
@@ -166,7 +168,7 @@ services:
       # supports_preserve_reasoning capability.
       - --reasoning-preserve
 
-      # Disable the bundled web UI — this profile is API-only.
+      # Disable the bundled web UI — this service is API-only.
       - --no-webui
 
       # Listens on all interfaces inside the container. The published port

@@ -11,7 +11,8 @@
 # Build:
 #   docker build -t drluoto-llamacpp:strix-halo-vulkan drluoto/
 #
-# The image is the build context of the `drluoto` Compose profile.
+# The image is the build context of the default Compose service
+# (`qwen-drluoto-mtp`).
 
 ARG UBUNTU_VERSION=26.04
 
@@ -62,6 +63,6 @@ ENV GGML_VK_DISABLE_GDN_CACHE_FUSION=1
 ENV VK_LOADER_DEBUG=error
 
 EXPOSE 8080
-# No ENTRYPOINT: the Compose profiles spell the full command line, starting
+# No ENTRYPOINT: the Compose service spells out the full command line, starting
 # with llama-server itself, so an entrypoint would end up as the first argument.
 CMD ["llama-server", "--help"]

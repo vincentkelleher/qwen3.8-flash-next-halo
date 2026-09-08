@@ -6,7 +6,7 @@ Halo box (Ryzen AI MAX+ 395 / Radeon 8060S). It serves
 through [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp)
 `strix-halo-vulkan` — the only build here that loads that draft head.
 
-![Docker](https://img.shields.io/badge/Docker-compose%20profile%20drluoto-2496ED?logo=docker&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose%20default%20service-2496ED?logo=docker&logoColor=white)
 ![llama.cpp](https://img.shields.io/badge/llama.cpp-ba5354d46-555)
 ![Backend](https://img.shields.io/badge/backend-Vulkan%2FRADV-555)
 
@@ -18,7 +18,7 @@ the GGUFs needs to sit on disk.
 
 | Path | What it does |
 |---|---|
-| `docker-compose.yaml` | The `drluoto` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
+| `docker-compose.yaml` | The default `qwen-drluoto-mtp` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
 | `drluoto/Dockerfile` | Image for `drluoto/llama.cpp` `strix-halo-vulkan`, pinned to `ba5354d46` |
 | `EngramHalo.cpp/` | Upstream Strix Halo clone, kept for its tuning docs (gitignored, no longer a build context) |
 
@@ -109,11 +109,13 @@ To serve without auth, comment out the `--api-key-file` lines and the
 
 ## Running
 
+`qwen-drluoto-mtp` is the only service in `docker-compose.yaml` and carries no
+`profiles:` key, so it runs on plain `docker compose up` — no `--profile` flag.
 The first build clones llama.cpp and compiles it against Vulkan, which takes a
 while; later starts reuse the image.
 
 ```sh
-docker compose --profile drluoto up -d --build
+docker compose up -d --build
 docker logs -f qwen38-flash-next-qwen-drluoto-mtp-1
 ```
 
@@ -127,7 +129,7 @@ until curl -sf http://127.0.0.1:8080/health >/dev/null; do sleep 10; done
 ```
 
 ```sh
-docker compose --profile drluoto exec qwen-drluoto-mtp llama-server --list-devices   # takes a minute to init Vulkan
+docker compose exec qwen-drluoto-mtp llama-server --list-devices   # takes a minute to init Vulkan
 # Vulkan0: Radeon 8060S Graphics (RADV STRIX_HALO) (127488 MiB, ...)
 
 KEY=$(cat .api-key)
