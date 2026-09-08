@@ -85,15 +85,19 @@ services:
       - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
 
       # Follow the Frogerric chat template recommandations (https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates#recommended-sampling-parameters)
-      # Only the values that differ from the llama-server defaults are passed:
-      # the recommendation also asks for top-p 0.95 and presence-penalty 0.0,
-      # which are already the defaults.
+      # The recommendation is passed in full and explicitly. top-p 0.95 and
+      # presence-penalty 0.0 are also the llama-server defaults today; pinning
+      # them keeps the sampler fixed if those defaults ever move.
       - --temperature  # 1.0 — the template's recommended setting (default 0.80)
       - "1.0"
       - --top-k          # 20 — sample from the 20 highest-probability tokens (default 40)
       - "20"
+      - --top-p          # 0.95 — keep tokens up to 95% cumulative probability (default 0.95)
+      - "0.95"
       - --min-p          # 0.0 — no floor relative to the top token's probability (default 0.05)
       - "0.0"
+      - --presence-penalty
+      - "0.0"          # 0.0 — no penalty for tokens already in the context (default 0.0)
 
       # MTP speculative decoding: draft the next 3 tokens, accept all of them.
       # p-min 0.0 is what the sidecar was validated with — its draft logits are

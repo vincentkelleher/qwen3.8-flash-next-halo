@@ -169,7 +169,8 @@ What `docker-compose.yaml` starts, minus the paths:
 | `--reasoning-format` | `deepseek` | thoughts are returned as `message.reasoning_content` |
 | `--reasoning-preserve` | — | keep the reasoning trace in the whole history, not just the last assistant message |
 | `--temperature` | `1.0` | sampler defaults follow the template's recommendations |
-| `--top-k` / `--min-p` | `20` / `0.0` | the rest of the recommendation — `top-p 0.95`, presence penalty `0.0` — is already the server default |
+| `--top-k` / `--top-p` / `--min-p` | `20` / `0.95` / `0.0` | pinned explicitly, including where it matches the server default |
+| `--presence-penalty` | `0.0` | no penalty for tokens already in the context |
 | `-ngl` | `999` | full offload |
 | `-fa` | `on` | flash attention |
 | `-b` / `-ub` | `2048` / `2048` | batching from the validated host run |
@@ -219,8 +220,9 @@ What `docker-compose.yaml` starts, minus the paths:
   `drluoto/run-bench.sh`, the image's `/opt/bench/spektrum.py` replay and the
   `llama-bench` build target are gone. The flags come from the fork and from
   one host pass on this box — measure your own before trusting them elsewhere.
-- Server-side sampling defaults are the template's recommended `temperature` 1.0
-  / `top-k` 20 / `top-p` 0.95. Pin `temperature: 0` per request for greedy.
+- Server-side sampling defaults are the template's recommended `temperature`
+  1.0, `top-k` 20, `top-p` 0.95, `min-p` 0.0 and `presence-penalty` 0.0. Pin
+  `temperature: 0` per request for greedy.
 - `setup.sh` and `setup.py` (precheck, clone, key, weights, verify) are
   ROCm-era and still name the removed `qwen-long` service and the EasiiX draft
   head. They are out of the working tree and only in git history; follow this
