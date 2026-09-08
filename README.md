@@ -239,8 +239,13 @@ What `docker-compose.yaml` starts, minus the paths:
 
 - [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) —
   `strix-halo-vulkan`, the MTP head and the state-cache work.
+- [drluoto/Qwen3.8-Flash-Next-MTP-GGUF](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
+  — the FR-Spec MTP draft head this service serves.
 - [unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF)
   — model and mmproj.
+- [froggeric/Qwen-Fixed-Chat-Templates](https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates)
+  — the fixed chat template the server requires, and the recommended sampling
+  parameters it pins.
 - [Aristo94/EngramHalo.cpp](https://github.com/Aristo94/EngramHalo.cpp) — the
   Strix Halo patch series and the
   [setup docs](https://github.com/Aristo94/EngramHalo.cpp/tree/strix-halo-qwen4exp/docs/strix-halo)
