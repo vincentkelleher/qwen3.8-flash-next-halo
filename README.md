@@ -1,85 +1,85 @@
 # Qwen 3.8 Flash-Next on Strix Halo
 
-Docker Compose setup for serving Qwen 3.8 Flash-Next on an AMD Strix Halo box
-(Ryzen AI MAX+ 395 / Radeon 8060S) using
-[EngramHalo.cpp](https://github.com/Aristo94/EngramHalo.cpp) — a patched
-llama.cpp branch with a working MTP draft head and an SSD-backed engram table.
+Docker Compose setup for the Qwen 3.8 Flash-Next MTP service on an AMD Strix
+Halo box (Ryzen AI MAX+ 395 / Radeon 8060S). It serves
+[`drluoto/Qwen3.8-Flash-Next-MTP-GGUF`](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
+through [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp)
+`strix-halo-vulkan` — the only build here that loads that draft head.
 
-The repo is just the deployment config: three `llama-server` profiles
-(ROCm, Vulkan, a short-context "fast" variant), the download commands for the
-weights, and the benchmark scripts. The engine itself lives upstream.
+![Docker](https://img.shields.io/badge/Docker-compose%20profile%20drluoto-2496ED?logo=docker&logoColor=white)
+![llama.cpp](https://img.shields.io/badge/llama.cpp-ba5354d46-555)
+![Backend](https://img.shields.io/badge/backend-Vulkan%2FRADV-555)
 
-![Docker](https://img.shields.io/badge/Docker-compose%20profiles-2496ED?logo=docker&logoColor=white)
+The repo is the deployment config: one `llama-server` service and the download
+commands for the weights. The engine is cloned inside the image, so nothing but
+the GGUFs needs to sit on disk.
 
 ## What is in here
 
 | Path | What it does |
 |---|---|
-| `docker-compose.yaml` | Three `llama-server` profiles: `long` (ROCm, 128K), `fast`, `vulkan` |
-| `EngramHalo.cpp/` | Clone of the tuned llama.cpp branch — build context for the images (gitignored) |
-| `drluoto/` | Vulkan image for [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`, plus the MTP workload replay |
-| `benchmarks/` | `perfbench.py` and the A/B test plan (gitignored) |
-| `.api-key` | Server API key, mounted read-only as a compose secret (gitignored) |
+| `docker-compose.yaml` | The `drluoto` service: Vulkan/RADV `llama-server` on port `8080`, API key required |
+| `drluoto/Dockerfile` | Image for `drluoto/llama.cpp` `strix-halo-vulkan`, pinned to `ba5354d46` |
+| `EngramHalo.cpp/` | Upstream Strix Halo clone, kept for its tuning docs (gitignored, no longer a build context) |
 
-Default profile runs 128K context, MTP + n-gram speculative decoding, Q8 KV
-cache, and the 26.8 GiB engram table on NVMe via `mmap` — roughly 1 GiB
-resident instead of 26.8 GiB pinned.
+## Why this branch
+
+The MTP head this service serves is an FR-Spec draft: its output vocabulary is
+trimmed to 65,536 frequency-ranked rows with a `d2t` map back to real token
+ids. Stock llama.cpp rejects it for the missing `t2d`/`d2t` tensors, and
+EngramHalo.cpp does not read that layout either. Upstream puts it plainly: the
+draft head "needs this branch; stock llama.cpp will not load it".
 
 ## Prerequisites
 
 - AMD Strix Halo (Ryzen AI MAX+ 395 / Radeon 8060S, `gfx1151`), 128 GB unified
-  memory. The 96 GB variant works with smaller kernel/GTT limits — see the
-  upstream [Strix Halo notes](https://github.com/Aristo94/EngramHalo.cpp/tree/strix-halo-qwen4exp/docs/strix-halo).
-- ~100 GB free NVMe for the GGUFs. Put them on your fastest drive: the engram
-  table is read straight off these files.
+  memory. This configuration does not fit in 96 GB.
+- ~100 GB free NVMe for the GGUFs. `-lm dio` reads them with `O_DIRECT`, so the
+  mount has to be a local filesystem — ext4 on NVMe, not a network share.
 - Docker Engine with the Compose plugin, and the `hf` (Hugging Face) CLI.
-- Kernel args for the GTT aperture, in `/etc/default/grub` (values below are
-  for the 128 GB host):
+- The container needs `/dev/dri`: RADV talks to the GPU through the render
+  node. `/dev/kfd` is not passed through.
 
-  ```text
-  amd_iommu=off amdgpu.gttsize=126976 ttm.pages_limit=32505856
-  ```
+<details>
+<summary>Kernel args this box runs with (from the ROCm setup)</summary>
+
+In `/etc/default/grub`, for a 128 GB host:
+
+```text
+amd_iommu=off amdgpu.gttsize=126976 ttm.pages_limit=32505856
+```
+
+They size the GTT aperture and the TTM page pool. They were tuned for the ROCm
+path; the Vulkan path has not been re-measured against other values, but the
+90 GiB model plus the driver's own allocations do not fit without them.
+
+</details>
 
 ## Setting up
 
-**1. Clone the tuned fork into this directory.** It is the build context for
-both images, and must sit at `./EngramHalo.cpp`.
-
-```sh
-git clone \
-  --branch strix-halo-qwen4exp \
-  https://github.com/Aristo94/EngramHalo.cpp.git
-```
-
-**2. Create the API key.**
-
-```sh
-umask 077 && openssl rand -base64 48 > .api-key
-```
-
-**3. Pull the weights (~100 GB).** They land under `~/Models`, which the
-compose file mounts read-only at `/models`. Keep the directory layout as
-written — the server command lines reference these exact paths.
+**1. Pull the weights (~98 GB, 91.5 GiB).** They land under `~/Models`, which
+`docker-compose.yaml` mounts read-only at `/models`. Keep the layout as
+written: the server command line references these exact paths.
 
 ```sh
 mkdir -p ~/Models && cd ~/Models
 
-# main model, IQ4_XS (3 shards, ~93 GB)
+# main model, UD-IQ4_XS (3 shards, ~94 GB)
 hf download unsloth/Qwen3.8-Flash-Next-GGUF \
   --local-dir unsloth/Qwen3.8-Flash-Next-GGUF \
   --include "*UD-IQ4_XS*"
 
-# MTP draft head
-hf download EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF \
-  mtp-Qwen3.8-Flash-Next-Q8_0.gguf \
-  --local-dir EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF
+# replacement chat template — the server exits if this file is missing
+hf download froggeric/Qwen-Fixed-Chat-Templates \
+  chat_template.jinja \
+  --local-dir froggeric/Qwen-Fixed-Chat-Templates
 
-# FR-Spec MTP head, only needed for the `drluoto` profile (3.64 GB)
+# FR-Spec MTP head (3.64 GB) — the whole reason for this branch
 hf download drluoto/Qwen3.8-Flash-Next-MTP-GGUF \
   mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf \
   --local-dir drluoto/Qwen3.8-Flash-Next-MTP-GGUF
 
-# vision head
+# vision head (only needed while the --mmproj lines are in the compose file)
 hf download unsloth/Qwen3.8-Flash-Next-GGUF \
   mmproj-BF16.gguf \
   --local-dir unsloth/Qwen3.8-Flash-Next-GGUF
@@ -89,148 +89,153 @@ Expected result:
 
 ```text
 ~/Models
-├── EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
 ├── drluoto/Qwen3.8-Flash-Next-MTP-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf
+├── froggeric/Qwen-Fixed-Chat-Templates/chat_template.jinja
 └── unsloth/Qwen3.8-Flash-Next-GGUF
     ├── mmproj-BF16.gguf
     └── UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-0000{1,2,3}-of-00003.gguf
 ```
 
-## Running the project
-
-Build and start the default (ROCm, 128K) profile. The first build compiles
-llama.cpp against ROCm 7.14 and takes a while; later starts reuse the image.
+**2. Create an API key (required).** The service passes `--api-key-file` and
+mounts `./.api-key` as a Compose secret, so it will not start without the file,
+and every `/v1` request needs it as a bearer token:
 
 ```sh
-docker compose --profile long up -d
-docker logs -f qwen38-flash-next-qwen-long-1
+umask 077 && openssl rand -base64 48 > .api-key
 ```
 
-Wait for `server_ready` in the log, then check it answers:
+To serve without auth, comment out the `--api-key-file` lines and the
+`secrets:` entry in `docker-compose.yaml`.
+
+## Running
+
+The first build clones llama.cpp and compiles it against Vulkan, which takes a
+while; later starts reuse the image.
 
 ```sh
-curl -s -H "Authorization: Bearer $(cat .api-key)" \
-  http://127.0.0.1:8080/v1/models
+docker compose --profile drluoto up -d --build
+docker logs -f qwen38-flash-next-qwen-drluoto-mtp-1
+```
 
-curl -s -H "Authorization: Bearer $(cat .api-key)" \
-  -H 'Content-Type: application/json' \
+Model load means reading ~88 GiB of GGUFs with `O_DIRECT`, so give it a few
+minutes. Poll
+`/health` until it answers, then check the GPU and the model are the ones you
+expect:
+
+```sh
+until curl -sf http://127.0.0.1:8080/health >/dev/null; do sleep 10; done
+```
+
+```sh
+docker compose --profile drluoto exec qwen-drluoto-mtp llama-server --list-devices   # takes a minute to init Vulkan
+# Vulkan0: Radeon 8060S Graphics (RADV STRIX_HALO) (127488 MiB, ...)
+
+KEY=$(cat .api-key)
+
+curl -s http://127.0.0.1:8080/health
+curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8080/v1/models
+
+curl -s -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $KEY" \
   http://127.0.0.1:8080/v1/chat/completions \
   -d '{
-    "model": "qwen3.8-flash-next",
+    "model": "qwen3.8-flash-next-mtp",
     "messages": [{"role": "user", "content": "Hello"}],
     "temperature": 0
   }'
 ```
 
-Point any OpenAI-compatible client at `http://<host>:8080/v1` with the model
-name `qwen3.8-flash-next`.
+Point an OpenAI-compatible client at `http://<host>:8080/v1` with the model
+name `qwen3.8-flash-next-mtp` and the same bearer token. `docker compose down`
+stops the service.
 
-Other profiles:
+The server logs `model loaded` when it is up, and `/health` answers
+`200` once the socket is serving.
 
-```sh
-docker compose --profile fast up -d     # 32K context, engram table in RAM
-docker compose --profile vulkan up -d   # Vulkan/RADV build
-docker compose down                     # stop
-```
+<details>
+<summary>The full server command line</summary>
 
-## The MTP benchmark profile
+What `docker-compose.yaml` starts, minus the paths:
 
-The MTP head this profile serves —
-[`drluoto/Qwen3.8-Flash-Next-MTP-GGUF`](https://huggingface.co/drluoto/Qwen3.8-Flash-Next-MTP-GGUF)
-— is an FR-Spec draft: its output vocabulary is trimmed to 65,536
-frequency-ranked rows with a `d2t` map back to real token ids, and only
-[drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`
-reads that layout. Neither EngramHalo.cpp nor stock llama.cpp can load it, so
-this profile does not use the `EngramHalo.cpp` build context at all — it builds
-its own image from `drluoto/Dockerfile`, pinned to `ba5354d46`. Upstream puts it
-plainly: the draft head "needs this branch; stock llama.cpp will not load it".
+| Flag | Value | Why |
+|---|---|---|
+| `-m` | `UD-IQ4_XS` shard `00001` of `00003` | stock quant; the sidecar was trained against the BF16 base |
+| `-md` | `mtp-...-Q8_0-frspec-65k.gguf` | FR-Spec MTP draft head |
+| `--spec-type` | `draft-mtp` | MTP speculative decoding |
+| `--spec-draft-n-max` | `3` | draft up to 3 tokens per step |
+| `--spec-draft-p-min` | `0.0` | no probability floor under a draft |
+| `--mmproj` | `mmproj-BF16.gguf` | vision head, not part of the validated configuration |
+| `--jinja` + `--chat-template-file` | Froggeric fixed template | replaces the template embedded in the GGUF; `--jinja` has to come first |
+| `--reasoning-format` | `deepseek` | thoughts are returned as `message.reasoning_content` |
+| `--reasoning-preserve` | — | keep the reasoning trace in the whole history, not just the last assistant message |
+| `--temperature` | `1.0` | sampler defaults follow the template's recommendations |
+| `--top-k` / `--min-p` | `20` / `0.0` | the rest of the recommendation — `top-p 0.95`, presence penalty `0.0` — is already the server default |
+| `-ngl` | `999` | full offload |
+| `-fa` | `on` | flash attention |
+| `-b` / `-ub` | `2048` / `2048` | batching from the validated host run |
+| `-c` | `264000` | shared context |
+| `--parallel` | `2` | two slots, ~132,000 tokens each |
+| `--ctx-checkpoints` | `8` | lets the parallel slots rotate |
+| `-ctk` / `-ctv` | `f16` / `f16` | full-precision K/V; a quantised cache costs acceptance |
+| `-lm` | `dio` | model loading mode (`-lm` is `--load-mode`) |
+| `--no-webui` | — | API only |
+| `--host` / `--port` | `0.0.0.0` / `8080` | in-container bind; see the published port below |
+| `--api-key-file` | `/run/secrets/qwen_api_key` | bearer token from `./.api-key` |
+| `--alias` | `qwen3.8-flash-next-mtp` | OpenAI model name |
 
-```sh
-docker compose --profile drluoto up -d --build
-curl -s http://127.0.0.1:8081/health
-```
-
-It also loads the vision projector the other profiles use —
-`mmproj-BF16.gguf`, a Qwen3-VL ViT with a `qwen3vl_merger` head — although the
-benchmark below is text-only and vision on this fork is unproven: nothing under
-`tools/mtmd` of `strix-halo-vulkan` mentions the `qwen4exp` architecture, so
-expect `model does not support vision input` if the branch cannot pair the
-projector with this model. Delete those two lines and the profile is the
-benchmark configuration again.
-
-This profile is otherwise the benchmark configuration, not a production
-tuning: MTP only (`--spec-type draft-mtp`), three draft tokens, no draft
-probability floor, full-precision F16 K/V, 262,144-token context across three
-slots, and `-lm dio`. It listens on `127.0.0.1:8081` without an API key, so replaying the
-workloads needs no extra header; add `--api-key-file` before exposing it.
-
-Reproduce the measurement with the workload replay baked into the image:
-
-```sh
-./drluoto/run-bench.sh        # six workloads, plus memory sampling
-```
-
-## MTP results
-
-One pass of the six-workload replay against the profile flags, on a host build
-of `ba5354d46` (Vulkan, Mesa 26.2.1, `GGML_VK_DISABLE_GDN_CACHE_FUSION=1`),
-greedy sampling, `cache_prompt: false`. These are server-reported timings, not
-repeated runs. Acceptance counts accepted draft tokens over drafted tokens;
-`--spec-draft-p-min 0.0` puts no probability floor under a draft.
-
-| Workload | Prompt tokens | Prefill | Decode | Tokens/step | Acceptance |
-|---|---:|---:|---:|---:|---:|
-| short code @0 | 39 | 103.0 | 55.8 | 3.66 | 0.90 |
-| new code @8k | 8,210 | 565.2 | 50.1 | 3.53 | 0.85 |
-| prose @8k | 8,221 | 558.0 | 31.2 | 2.20 | 0.40 |
-| file rewrite @8k | 8,362 | 531.1 | 52.4 | 3.97 | 1.00 |
-| new code @32k | 32,763 | 430.8 | 35.8 | 2.89 | 0.64 |
-| file rewrite @32k | 32,314 | 446.3 | 48.0 | 3.97 | 1.00 |
-
-The same shards without a draft head decoded at 28.28 tokens/s
-(`llama-bench`, tg128), so MTP is worth about 1.1x to 2.0x here: it pays when
-the output is structured or copied, and prose barely clears the verification
-cost. Memory across the run averaged 109.15 GiB and peaked at 118.32 GiB
-(`MemTotal - MemAvailable`, a combined CPU+GPU figure on this unified-memory
-board).
-
-`./drluoto/run-bench.sh` replays the same suite against the container. Two
-caveats when you do: the profile also mounts the vision projector, which the
-measured run did not, and the container itself has not been timed against the
-host run.
+</details>
 
 ## Notes and limitations
 
-- Tuned and measured on ROCm/HIP only. The upstream docs report the Vulkan
-  path as a net loss versus a stock build on RADV; the `vulkan` profile exists
-  and builds, but is untested here.
-- `--parallel 2` is what this box is validated on. The MTP / sparse-gather path
-  is best validated at low concurrency.
-- `-lm mmap` is load-bearing for 128K context. Never add `--no-mmap`: it
-  silently disables the lazy-read path and pins the whole table.
-- Specs and tuning flags in `docker-compose.yaml` are tuned for one machine
-  (128 GB, NVMe, CPU governor `powersave`). Retune before trusting the numbers
-  elsewhere.
-- `benchmarks/` and `EngramHalo.cpp/` are gitignored, so a fresh clone needs
-  step 1 above before any compose command will build. The `drluoto` profile is
-  the exception: it clones its engine inside the image and needs nothing on
-  disk but the weights.
-- The `drluoto` profile pins a fork commit (`ba5354d46`), not the EngramHalo
-  engine, and it is the only place the FR-Spec draft head loads. Two flags are
-  load-bearing there: `GGML_VK_DISABLE_GDN_CACHE_FUSION=1` sidesteps a fused
-  state-cache kernel that corrupts output on the 8060S, and `-lm dio` wants a
-  filesystem with `O_DIRECT` (local ext4/NVMe — not a network mount).
-- The `drluoto` profile serves unauthenticated on `127.0.0.1:8081` because that
-  is how the benchmark was run. Do not republish it on a LAN address without
-  adding `--api-key-file`.
+- The service publishes `0.0.0.0:8080:8080` and binds `--host 0.0.0.0`, so it
+  is reachable from every interface the box has. It is behind an API key, but
+  change the mapping to `127.0.0.1:8080:8080` if you only serve localhost — and
+  do not remove `--api-key-file` while it is published on a LAN address.
+- Two settings are load-bearing: `GGML_VK_DISABLE_GDN_CACHE_FUSION=1` sidesteps
+  a fused state-cache kernel that corrupts output on the 8060S, and `-lm dio`
+  needs `O_DIRECT`. Never add `--no-mmap` alongside it.
+- The served chat template is `--chat-template-file` (Froggeric's fixed
+  template) with `--reasoning-format deepseek` and `--reasoning-preserve`, not
+  the one embedded in the GGUFs. Download it (step 1) or the server exits at
+  startup, and keep `--jinja` ahead of it — the server otherwise only accepts
+  its built-in templates. `--reasoning-preserve` does nothing unless the
+  template advertises `supports_preserve_reasoning`.
+- The vision head is along for the ride and unproven on this branch:
+  `mmproj-BF16.gguf` is a Qwen3-VL ViT with a `qwen3vl_merger` head, the workloads
+  are text-only, and nothing under `tools/mtmd` of `strix-halo-vulkan` mentions
+  the `qwen4exp` architecture. If the server dies on `model does not support
+  vision input`, delete the two `--mmproj` lines and the service is the plain
+  text-only MTP configuration again.
+- `--parallel 2` is what this box is validated on; the MTP and sparse-gather
+  paths are best validated at low concurrency. For one full-native-context
+  session, set `--parallel` to `1`.
+- Specs and flags are tuned for one machine (128 GB, NVMe, CPU governor
+  `powersave`). Retune before trusting these settings elsewhere.
+- Vulkan here is the only path left in `docker-compose.yaml`. The ROCm/HIP
+  profiles that used the [EngramHalo.cpp](https://github.com/Aristo94/EngramHalo.cpp)
+  engine were removed; upstream reports the Vulkan path as a net loss against a
+  stock build on RADV, and this branch has not been compared against ROCm here.
+- No timing numbers here, and no tooling to produce them:
+  `drluoto/run-bench.sh`, the image's `/opt/bench/spektrum.py` replay and the
+  `llama-bench` build target are gone. The flags come from the fork and from
+  one host pass on this box — measure your own before trusting them elsewhere.
+- Server-side sampling defaults are the template's recommended `temperature` 1.0
+  / `top-k` 20 / `top-p` 0.95. Pin `temperature: 0` per request for greedy.
+- `setup.sh` and `setup.py` (precheck, clone, key, weights, verify) are
+  ROCm-era and still name the removed `qwen-long` service and the EasiiX draft
+  head. They are out of the working tree and only in git history; follow this
+  README for the weights.
+- The image pins a fork commit (`ba5354d46`) rather than a release, so the
+  branch moving upstream does not change what you build.
+- No license file yet.
 
 ## Acknowledgements
 
+- [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) —
+  `strix-halo-vulkan`, the MTP head and the state-cache work.
+- [unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF)
+  — model and mmproj.
 - [Aristo94/EngramHalo.cpp](https://github.com/Aristo94/EngramHalo.cpp) — the
   Strix Halo patch series and the
   [setup docs](https://github.com/Aristo94/EngramHalo.cpp/tree/strix-halo-qwen4exp/docs/strix-halo)
-  this config follows.
-- [unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF)
-  — model and mmproj.
-- [EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF](https://huggingface.co/EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF)
-  — prebuilt MTP sidecar.
+  this config grew out of.

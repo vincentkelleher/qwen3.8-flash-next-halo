@@ -1,285 +1,73 @@
 name: qwen38-flash-next
 
-x-qwen-common: &qwen-common
-  build:
-    context: ./EngramHalo.cpp/docs/strix-halo
-    dockerfile: Dockerfile.rocm-7.14
-  image: engramhalo:qwen38-flash-rocm-7.14
-
-  restart: unless-stopped
-
-  devices:
-    - /dev/kfd:/dev/kfd
-    - /dev/dri:/dev/dri
-
-  security_opt:
-    - seccomp=unconfined
-
-  environment:
-    # Recommended by EngramHalo
-    ROCBLAS_USE_HIPBLASLT: "1"
-
-  volumes:
-    # IMPORTANT: ideally put ./models on your fastest NVMe.
-    # mmap/tensor-read-lazy operates directly on these files.
-    - ~/Models:/models:ro
-
-  # ./.api-key is mounted at /run/secrets/qwen_api_key (read-only)
-  secrets:
-    - qwen_api_key
-
-  # Keep the API local to the machine by default.
-  # Change 127.0.0.1 to 0.0.0.0 if you want LAN access.
-  ports:
-    - "0.0.0.0:8080:8080"
-
-  stop_grace_period: 30s
+# =============================================================================
+# Qwen 3.8 Flash-Next — MTP profile (drluoto/llama.cpp, Vulkan/RADV)
+#
+# Container for the MTP configuration validated on this box: the drluoto
+# `strix-halo-vulkan` branch (pinned in drluoto/Dockerfile), the FR-Spec
+# MTP-only draft head, and the server flags that validation run used.
+#
+#   docker compose --profile drluoto up -d --build
+#   curl -s http://127.0.0.1:8080/health
+# =============================================================================
 
 services:
 
-  # -------------------------------------------------------
-  # Recommended default
-  #
-  # 128K context
-  # SSD-backed n-gram / engram table
-  # MTP speculative decoding
-  #
-  # docker compose --profile long up -d
-  # -------------------------------------------------------
-  qwen-long:
-    <<: *qwen-common
-    profiles:
-      - long
-
-    command:
-      - llama-server
-
-      # API Key (lives in ./.api-key, mounted read-only by docker compose)
-      - --api-key-file
-      - /run/secrets/qwen_api_key
-
-      # Model
-      - -m
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
-
-      # MTP draft model
-      - -md
-      - /models/EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
-
-      # Vision Head
-      - --mmproj
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
-
-      # Offload everything possible
-      - -ngl
-      - "999"
-
-      # Tensor read lazy
-      - --lazy-mode
-      - "on"
-
-      # Flash Attention
-      - -fa
-      - "on"
-
-      # Q8 KV cache
-      - -ctk
-      - q8_0
-      - -ctv
-      - q8_0
-
-      # SSD-backed 26.8 GiB engram table
-      - -lm
-      - mmap
-
-      # 128K context on two slots
-      - -c
-      - "262144"
-
-      # EngramHalo recommended batching
-      - -b
-      - "8192"
-      - -ub
-      - "2048"
-
-      # Recommended for mmap mode
-      - -t
-      - "4"
-
-      # MTP / sparse gather currently best validated single-slot
-      - --parallel
-      - "2"
-
-      # Qwen chat template
-      - --jinja
-
-      # Default reasoning level (clients can override per-request)
-      - --reasoning-effort
-      - medium
-
-      # MTP speculative decoding
-      - --spec-type
-      - draft-mtp,ngram-mod
-      - --spec-draft-n-max
-      - "4"
-      - --spec-draft-p-min
-      - "0.75"
-
-      # API only
-      - --no-webui
-
-      # Network
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-
-      # Friendly OpenAI model name
-      - --alias
-      - qwen3.8-flash-next
-
-
-  # -------------------------------------------------------
-  # Vulkan/RADV profile
-  #
-  # Same long-context server settings as qwen-long, but builds the Vulkan image.
-  # docker compose --profile vulkan up -d
-  # -------------------------------------------------------
-  qwen-vulkan:
-    <<: *qwen-common
-    build:
-      context: ./EngramHalo.cpp/docs/strix-halo
-      dockerfile: Dockerfile.vulkan
-    image: engramhalo:qwen38-flash-vulkan
-    profiles:
-      - vulkan
-
-    command:
-      - llama-server
-
-      # API Key (lives in ./.api-key, mounted read-only by docker compose)
-      - --api-key-file
-      - /run/secrets/qwen_api_key
-
-      # Model
-      - -m
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
-
-      # MTP draft model
-      - -md
-      - /models/EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
-
-      # Vision Head
-      - --mmproj
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
-
-      # Offload everything possible
-      - -ngl
-      - "999"
-
-      # Tensor read lazy
-      - --lazy-mode
-      - "on"
-
-      # Flash Attention
-      - -fa
-      - "on"
-
-      # Q8 KV cache
-      - -ctk
-      - q8_0
-      - -ctv
-      - q8_0
-
-      # SSD-backed 26.8 GiB engram table
-      - -lm
-      - mmap
-
-      # 128K context on two slots
-      - -c
-      - "262144"
-
-      # EngramHalo recommended batching
-      - -b
-      - "8192"
-      - -ub
-      - "2048"
-
-      # Recommended for mmap mode
-      - -t
-      - "4"
-
-      # MTP / sparse gather currently best validated single-slot
-      - --parallel
-      - "2"
-
-      # Qwen chat template
-      - --jinja
-
-      # Default reasoning level (clients can override per-request)
-      - --reasoning-effort
-      - medium
-
-      # MTP speculative decoding
-      - --spec-type
-      - draft-mtp,ngram-mod
-      - --spec-draft-n-max
-      - "4"
-      - --spec-draft-p-min
-      - "0.75"
-
-      # API only
-      - --no-webui
-
-      # Network
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-
-      # Friendly OpenAI model name
-      - --alias
-      - qwen3.8-flash-next
-
-
-  # -------------------------------------------------------
-  # MTP benchmark profile (drluoto/llama.cpp, Vulkan/RADV)
-  #
-  # Reproducible container for the MTP measurement in README.md: the
-  # drluoto strix-halo-vulkan branch, the FR-Spec MTP-only draft head, and
-  # the exact server flags that were benched.
-  #
-  # docker compose --profile drluoto up -d
-  # -------------------------------------------------------
   qwen-drluoto-mtp:
-    <<: *qwen-common
+
+    # --- Image ---------------------------------------------------------------
+    # This profile builds its own image and needs nothing on disk but the
+    # weights: the engine is cloned inside the build, pinned to ba5354d46.
+    # Only the drluoto/llama.cpp fork reads the FR-Spec draft head.
     build:
       context: ./drluoto
       dockerfile: Dockerfile
     image: drluoto-llamacpp:strix-halo-vulkan
+
     profiles:
       - drluoto
 
-    # No EngramHalo env here: this is a stock Vulkan build, not the EngramHalo engine.
+    restart: unless-stopped
+
+    # --- Devices -------------------------------------------------------------
+    # RADV talks to the GPU through the render node. /dev/kfd (KFD/HSA compute)
+    # is not needed by the Vulkan backend, so it is not passed through.
+    devices:
+      - /dev/dri:/dev/dri
+
+    # Required for userspace GPU access under a default seccomp policy.
+    security_opt:
+      - seccomp=unconfined
+
     environment:
       # This branch's fused GDN state-cache path is broken on the 8060S and
-      # corrupts output. The benchmark runs with the fusion disabled.
+      # corrupts output. This profile runs with the fusion disabled.
       GGML_VK_DISABLE_GDN_CACHE_FUSION: "1"
-      # PORT read by the workload replay script (drluoto/run-bench.sh).
-      PORT: "8080"
 
-    # Loopback only, and no API key: this is the benchmark configuration, and
-    # the workload replay speaks unauthenticated HTTP. Add --api-key-file
-    # before binding this on 0.0.0.0.
-    secrets: []
+    volumes:
+      # IMPORTANT: ~/Models should live on your fastest NVMe — this profile
+      # loads with -lm dio (O_DIRECT), so it needs a local filesystem.
+      - ~/Models:/models:ro
+
+    secrets:
+      - qwen_api_key
+
     ports:
-      - "127.0.0.1:8081:8080"
+      - "0.0.0.0:8080:8080"
 
+    # Model load is ~90 GiB: leave time to shut down cleanly.
+    stop_grace_period: 30s
+
+    # --- Server flags --------------------------------------------------------
     command:
       - llama-server
 
-      # Model: same stock UD-IQ4_XS as the other profiles (3 shards).
-      # The sidecar was trained against the matching BF16 base model.
+      # API key, lives in ./.api-key (chmod 600), mounted read-only as a secret.
+      - --api-key-file
+      - /run/secrets/qwen_api_key
+
+      # Model: stock UD-IQ4_XS (3 shards). The MTP sidecar was trained against
+      # the matching BF16 base model.
       - -m
       - /models/unsloth/Qwen3.8-Flash-Next-GGUF/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
 
@@ -288,17 +76,27 @@ services:
       - -md
       - /models/drluoto/Qwen3.8-Flash-Next-MTP-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0-frspec-65k.gguf
 
-      # Vision head, same file the EngramHalo profiles use: a Qwen3-VL ViT
-      # (clip.projector_type = qwen3vl_merger). NOT part of the measured run
-      # below, and unverified on this fork: the MTP workloads are text-only and
-      # nothing in this branch's tools/mtmd mentions the qwen4exp arch. If the
-      # server dies on "model does not support vision input", drop these two
-      # lines and the profile is the benchmark again.
+      # Vision head — NOT part of the validated configuration and unverified here:
+      # the MTP workloads are text-only and nothing in this branch's tools/mtmd
+      # mentions the qwen4exp arch. If the server dies on "model does not
+      # support vision input", drop these two lines and the profile is exactly
+      # the plain text-only configuration again.
       - --mmproj
       - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
 
+      # Follow the Frogerric chat template recommandations (https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates#recommended-sampling-parameters)
+      # Only the values that differ from the llama-server defaults are passed:
+      # the recommendation also asks for top-p 0.95 and presence-penalty 0.0,
+      # which are already the defaults.
+      - --temperature  # 1.0 — the template's recommended setting (default 0.80)
+      - "1.0"
+      - --top-k          # 20 — sample from the 20 highest-probability tokens (default 40)
+      - "20"
+      - --min-p          # 0.0 — no floor relative to the top token's probability (default 0.05)
+      - "0.0"
+
       # MTP speculative decoding: draft the next 3 tokens, accept all of them.
-      # p-min 0.0 is what the sidecar was measured with - its draft logits are
+      # p-min 0.0 is what the sidecar was validated with — its draft logits are
       # uncalibrated, so any threshold throws away acceptance for nothing.
       - --spec-type
       - draft-mtp
@@ -307,26 +105,32 @@ services:
       - --spec-draft-p-min
       - "0.0"
 
-      # Explicit full offload; the benchmark run relied on the branch's
+      # Explicit full offload; the validated host run relied on the branch's
       # auto-fit pass, which offloads every layer on this box.
       - -ngl
       - "999"
 
+      # Flash attention — required to keep long-context attention fast; the MTP
+      # verify pass re-reads the K/V cache for every drafted position.
       - -fa
       - "on"
 
-      # Benchmark batching, not the EngramHalo 8192/2048 recommendation.
+      # Batching from the validated host run, not the EngramHalo 8192/2048
+      # recommendation.
       - -b
       - "2048"
       - -ub
       - "2048"
 
-      # 262144 total context on three slots (87552 tokens per request).
-      # For one full-native-context session, set --parallel to "1".
+      # 264000 tokens of shared context across 2 slots — each concurrent
+      # request can use up to ~132000 tokens (a slot's share of -c).
+      # The host run this config came from used 262144 tokens across three
+      # slots, so this is not that allocation. For a single full-context
+      # session, set --parallel to "1" so one slot owns the whole 264000.
       - -c
-      - "262144"
+      - "264000"
       - --parallel
-      - "3"
+      - "2"
 
       # Needed for the parallel slots to actually rotate.
       - --ctx-checkpoints
@@ -339,117 +143,49 @@ services:
       - -ctv
       - f16
 
-      # Direct I/O loader (the branch's own recommendation on Strix Halo).
-      # Never combine with --no-mmap.
+      # Model loading mode (-lm is --load-mode): direct I/O, the branch's own
+      # recommendation on Strix Halo. Never combine with --no-mmap.
       - -lm
       - dio
 
+      # Use Froggeric's chat template. --jinja has to come before
+      # --chat-template-file: without it the server only accepts its built-in
+      # templates.
       - --jinja
+      - --chat-template-file
+      - /models/froggeric/Qwen-Fixed-Chat-Templates/chat_template.jinja
+      - --reasoning-format
+      - deepseek
 
+      # Keep the reasoning trace in the whole history, not just in the last
+      # assistant message. Only meaningful with a template that advertises the
+      # supports_preserve_reasoning capability.
+      - --reasoning-preserve
+
+      # Disable the bundled web UI — this profile is API-only.
       - --no-webui
 
+      # Listens on all interfaces inside the container. The published port
+      # above is 0.0.0.0 too, so the API key is the only thing in front of it.
       - --host
       - 0.0.0.0
       - --port
       - "8080"
 
+      # Friendly OpenAI model name.
       - --alias
       - qwen3.8-flash-next-mtp
 
-
-  # -------------------------------------------------------
-  # Optional turbo profile
-  #
-  # 32K context
-  # keeps the whole engram table in RAM
-  #
-  # docker compose --profile fast up -d
-  # -------------------------------------------------------
-  qwen-fast:
-    <<: *qwen-common
-    profiles:
-      - fast
-
-    command:
-      - llama-server
-
-      # API Key (lives in ./.api-key, mounted read-only by docker compose)
-      - --api-key-file
-      - /run/secrets/qwen_api_key
-
-      # Model
-      - -m
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
-
-      # MTP draft model
-      - -md
-      - /models/EasiiX/Qwen3.8-Flash-Next-MTP-Strix-Halo-GGUF/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
-
-      # Vision Head
-      - --mmproj
-      - /models/unsloth/Qwen3.8-Flash-Next-GGUF/mmproj-BF16.gguf
-
-      - -ngl
-      - "999"
-
-      - -fa
-      - "on"
-
-      - -ctk
-      - q8_0
-      - -ctv
-      - q8_0
-
-      # RAM-backed engram table
-      - -lm
-      - none
-
-      # 32k context on two slots
-      - -c
-      - "65536"
-
-      - -b
-      - "8192"
-      - -ub
-      - "2048"
-
-      - -t
-      - "4"
-
-      - --parallel
-      - "2"
-
-      - --jinja
-
-      # Default reasoning level (clients can override per-request)
-      - --reasoning-effort
-      - medium
-
-      - --spec-type
-      - draft-mtp,ngram-mod
-      - --spec-draft-n-max
-      - "4"
-      - --spec-draft-p-min
-      - "0.75"
-
-      - --no-webui
-
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8080"
-
-      - --alias
-      - qwen3.8-flash-next
-
-
-# -------------------------------------------------------
+# =============================================================================
 # Secrets
 #
-# qwen_api_key is read from ./.api-key (chmod 600).
-# Regenerate with:
+# qwen_api_key is read from ./.api-key (chmod 600) and is required: the service
+# passes --api-key-file, so compose fails to start without the file and every
+# /v1 request needs the key as a bearer token. To serve without auth, drop the
+# secret and the --api-key-file lines.
+# Generate with:
 #   umask 077 && openssl rand -base64 48 > .api-key
-# -------------------------------------------------------
+# =============================================================================
 secrets:
   qwen_api_key:
     file: ./.api-key

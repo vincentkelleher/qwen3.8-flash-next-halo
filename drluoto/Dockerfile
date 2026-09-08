@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
 #
-# llama.cpp for the Qwen 3.8 Flash-Next MTP benchmark: the
+# llama.cpp for the Qwen 3.8 Flash-Next MTP service: the
 # [drluoto/llama.cpp](https://github.com/drluoto/llama.cpp) `strix-halo-vulkan`
 # branch, built against Vulkan/RADV.
 #
 # This is the only build on Strix Halo that runs the FR-Spec MTP sidecar
 # (`--spec-type draft-mtp` with a `qwen4exp` MTP head) on Vulkan. The tree is
-# pinned to the commit the numbers in README.md were measured on.
+# pinned to the commit this configuration was validated on.
 #
 # Build:
 #   docker build -t drluoto-llamacpp:strix-halo-vulkan drluoto/
@@ -41,7 +41,7 @@ RUN cmake -S . -B build -G Ninja \
         -DGGML_NATIVE=ON \
         -DLLAMA_CURL=OFF \
     && cmake --build build \
-        --target llama-server llama-bench \
+        --target llama-server \
         --parallel "$(nproc)"
 
 FROM ubuntu:${UBUNTU_VERSION} AS runtime
@@ -52,10 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/
-COPY --from=builder /build/llama.cpp/build/bin/llama-bench  /usr/local/bin/
 COPY --from=builder /build/llama.cpp/build/bin/*.so*        /usr/local/lib/
-# Workload replay for the MTP measurement (six fixed workloads, see README.md).
-COPY --from=builder /build/llama.cpp/scripts/strix-halo/spektrum.py /opt/bench/spektrum.py
 RUN ldconfig
 
 WORKDIR /models

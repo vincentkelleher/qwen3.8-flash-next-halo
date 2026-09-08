@@ -14,6 +14,5 @@ __pycache__
 *.pyc
 *.pyo
 
-# --- Benchmark output (server cmd lines, logs, host/hardware info) ---
-benchmarks/
+# --- Local logs ---
 *.log
