@@ -21,6 +21,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG LLAMA_REPO=https://github.com/drluoto/llama.cpp.git
 ARG LLAMA_BRANCH=strix-halo-vulkan
 ARG LLAMA_REF=ba5354d46ca63e8225c28e1331f0f7651723ad05
+ARG LLAMA_UPSTREAM_PATCH=df750f7.patch
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates cmake curl git ninja-build pkg-config \
@@ -28,12 +29,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
+# Ported upstream Vulkan change, kept as a patch because this fork carries
+# Strix Halo-specific work that prevents a clean upstream cherry-pick.
+COPY patches/ /build/patches/
 # The pinned commit lives on its own branch, so the clone has to fetch that
 # branch: a default-branch clone does not carry the commit at all.
 RUN git clone --single-branch --branch "${LLAMA_BRANCH}" "${LLAMA_REPO}" llama.cpp \
     && cd llama.cpp \
     && git checkout "${LLAMA_REF}" \
-    && git --no-pager log -1 --oneline
+    && git --no-pager log -1 --oneline \
+    && git apply --check "/build/patches/${LLAMA_UPSTREAM_PATCH}" \
+    && git apply "/build/patches/${LLAMA_UPSTREAM_PATCH}"
 
 WORKDIR /build/llama.cpp
 RUN cmake -S . -B build -G Ninja \

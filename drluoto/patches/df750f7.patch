@@ -1,0 +1,142 @@
+From b1e6ef1273c1c3e7abf5744664fa9dae5dc63572 Mon Sep 17 00:00:00 2001
+From: WakeUpMorty <balogkarlo4@gmail.com>
+Date: Wed, 9 Sep 2026 08:26:36 +0200
+Subject: [PATCH] vulkan: add dedicated iq4_xs mat-vec shader (#28426)
+
+* vulkan: add dedicated iq4_xs mat-vec shader
+
+Dedicated mul_mat_vec_iq4_xs for the dmmv path, replacing the generic fallback. ~+6-17% token generation on RDNA4 depending on model.
+
+Assisted-by: Pi agent with Qwen3.8 27B
+
+* vulkan iq4_xs: remove dead n_it unroll branch
+
+Remove the n_it <= 8 experimental branch that attempted to fully unroll
+the block loop. Since n_it is a runtime value, [[unroll]] is ignored by
+the compiler, making both branches equivalent. Kept the simple loop
+matching mul_mat_vec_iq3_s.comp.
+---
+ .../vulkan-shaders/mul_mat_vec_iq4_xs.comp    | 97 +++++++++++++++++++
+ .../vulkan-shaders/vulkan-shaders-gen.cpp     |  2 +-
+ 2 files changed, 98 insertions(+), 1 deletion(-)
+ create mode 100644 ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq4_xs.comp
+
+diff --git a/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq4_xs.comp b/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq4_xs.comp
+new file mode 100644
+index 000000000..a2b99d9ab
+--- /dev/null
++++ b/ggml/src/ggml-vulkan/vulkan-shaders/mul_mat_vec_iq4_xs.comp
+@@ -0,0 +1,97 @@
++#version 450
++
++#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
++
++#include "mul_mat_vec_base.glsl"
++
++layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
++
++FLOAT_TYPE temp[NUM_COLS][NUM_ROWS];
++
++// dedicated iq4_xs mat-vec, mirrors mul_mat_vec_iq3_s.comp
++// one packed32 word per l, so the 6-bit subblock scale is hoisted to a single fma after register accumulation
++
++void calc_superblock(const uint a_offset, const uint b_offset, const uint ib32, const uint i, const uint num_blocks_per_row, const uint first_row, const uint num_rows) {
++    const uint y_idx = i * QUANT_K + 32 * ib32;
++
++    uint ibi = a_offset + first_row * num_blocks_per_row + i;
++    [[unroll]] for (uint n = 0; n < num_rows; ++n) {
++        const float d = float(data_a[ibi].d);
++        const uint sl = (data_a[ibi].scales_l[ib32/2] >> (4 * (ib32 & 1))) & 0xF;
++        const uint sh = (data_a[ibi].scales_h >> (2 * ib32)) & 3;
++        const float dscale = d * float(int(sl | (sh << 4)) - 32);
++
++        FLOAT_TYPE sum[NUM_COLS];
++        [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
++            sum[j] = FLOAT_TYPE(0);
++        }
++
++        [[unroll]] for (uint l = 0; l < 4; ++l) {
++            const uint w = data_a_packed32[ibi].qs[4 * ib32 + l];
++            const u8vec4 q0 = unpack8(w & 0x0F0F0F0F);
++            const u8vec4 q1 = unpack8((w >> 4) & 0x0F0F0F0F);
++
++            [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
++                const vec4 b0 = vec4(data_b_v4[(j*p.batch_stride_b + b_offset + y_idx) / 4 + l]);
++                const vec4 b1 = vec4(data_b_v4[(j*p.batch_stride_b + b_offset + y_idx) / 4 + 4 + l]);
++
++                sum[j] = fma(FLOAT_TYPE(b0.x), FLOAT_TYPE(kvalues_iq4nl[q0.x]),
++                        fma(FLOAT_TYPE(b0.y), FLOAT_TYPE(kvalues_iq4nl[q0.y]),
++                        fma(FLOAT_TYPE(b0.z), FLOAT_TYPE(kvalues_iq4nl[q0.z]),
++                        fma(FLOAT_TYPE(b0.w), FLOAT_TYPE(kvalues_iq4nl[q0.w]),
++                        fma(FLOAT_TYPE(b1.x), FLOAT_TYPE(kvalues_iq4nl[q1.x]),
++                        fma(FLOAT_TYPE(b1.y), FLOAT_TYPE(kvalues_iq4nl[q1.y]),
++                        fma(FLOAT_TYPE(b1.z), FLOAT_TYPE(kvalues_iq4nl[q1.z]),
++                        fma(FLOAT_TYPE(b1.w), FLOAT_TYPE(kvalues_iq4nl[q1.w]),
++                        sum[j]))))))));
++            }
++        }
++
++        [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
++            temp[j][n] = fma(dscale, sum[j], temp[j][n]);
++        }
++
++        ibi += num_blocks_per_row;
++    }
++}
++
++void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
++    uint a_offset, b_offset, d_offset;
++
++    get_offsets(a_offset, b_offset, d_offset);
++
++    const uint num_blocks_per_row = p.ncols / QUANT_K;
++
++    // 8 threads are used to process each block
++    const uint blocks_per_wg = gl_WorkGroupSize.x/8;
++    const uint tid = gl_LocalInvocationID.x;
++    const uint itid = tid % 8;  // 0...7
++    const uint ix = tid / 8;
++
++    [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
++        [[unroll]] for (uint i = 0; i < NUM_ROWS; ++i) {
++            temp[j][i] = FLOAT_TYPE(0);
++        }
++    }
++
++    [[unroll]] for (uint i = ix; i < num_blocks_per_row; i += blocks_per_wg)
++        calc_superblock(a_offset, b_offset, itid, i, num_blocks_per_row, first_row, num_rows);
++
++    reduce_result(temp, d_offset, first_row, num_rows, tid);
++}
++
++void main() {
++    const uint first_row = NUM_ROWS * (gl_WorkGroupID.x + gl_NumWorkGroups.x * gl_WorkGroupID.z);
++
++    init_iq_shmem(gl_WorkGroupSize);
++
++    // do NUM_ROWS at a time, unless there aren't enough remaining rows
++    if (first_row + NUM_ROWS <= p.stride_d) {
++        compute_outputs(first_row, NUM_ROWS);
++    } else {
++        if (first_row >= p.stride_d) {
++            return;
++        }
++        compute_outputs(first_row, p.stride_d - first_row);
++    }
++}
+diff --git a/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp b/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
+index e2b74dc93..9a634dad8 100644
+--- a/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
++++ b/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
+@@ -734,7 +734,7 @@ void process_shaders() {
+     for (const auto& tname : type_names) {
+         // mul mat vec
+         std::string data_a_key = "DATA_A_" + to_uppercase(tname);
+-        std::string shader = (string_ends_with(tname, "_k") || string_starts_with(tname, "iq1_") || string_starts_with(tname, "iq2_") || string_starts_with(tname, "iq3_") || tname == "tq2_0") ? "mul_mat_vec_" + tname + ".comp" : "mul_mat_vec.comp";
++        std::string shader = (string_ends_with(tname, "_k") || string_starts_with(tname, "iq1_") || string_starts_with(tname, "iq2_") || string_starts_with(tname, "iq3_") || tname == "iq4_xs" || tname == "tq2_0") ? "mul_mat_vec_" + tname + ".comp" : "mul_mat_vec.comp";
+ 
+         string_to_spv("mul_mat_vec_" + tname + "_f32_f32", shader, merge_maps(base_dict, {{data_a_key, "1"}, {"B_TYPE", "float"}, {"B_TYPEV2", "vec2"}, {"B_TYPEV4", "vec4"}, {"D_TYPE", "float"}}));
+         string_to_spv("mul_mat_vec_" + tname + "_f16_f32", shader, merge_maps(base_dict, {{data_a_key, "1"}, {"B_TYPE", "float16_t"}, {"B_TYPEV2", "f16vec2"}, {"B_TYPEV4", "f16vec4"}, {"D_TYPE", "float"}}));
+-- 
+2.55.0
+
