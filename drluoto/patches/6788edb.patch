@@ -1,14 +1,14 @@
-From 341fb58547fc8eeb9b27f2438b696068495f140d Mon Sep 17 00:00:00 2001
+From 5afc239e755e97427b1483e0fa782542dc820448 Mon Sep 17 00:00:00 2001
 From: Port <port@local>
-Date: Fri, 11 Sep 2026 15:06:20 +0200
-Subject: [PATCH] vulkan: port small M matrix optimizations for qwen (#28457)
+Date: Fri, 11 Sep 2026 17:52:08 +0200
+Subject: [PATCH] vulkan: port small M matrix optimizations for qwen
 
 ---
- ggml/src/ggml-vulkan/ggml-vulkan.cpp | 30 ++++++++++++++++++----------
- 1 file changed, 20 insertions(+), 10 deletions(-)
+ ggml/src/ggml-vulkan/ggml-vulkan.cpp | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
 
 diff --git a/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
-index 3c039914a..9eebf8ed8 100644
+index 3c039914a..36291f17b 100644
 --- a/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 +++ b/ggml/src/ggml-vulkan/ggml-vulkan.cpp
 @@ -8854,7 +8854,7 @@ static uint32_t ggml_vk_guess_split_k(ggml_backend_vk_context * ctx, uint32_t m,
@@ -62,28 +62,6 @@ index 3c039914a..9eebf8ed8 100644
      // mul_mat_vec supports batching ne12*ne13 when ne11==1, or treating ne11 as the batch size (up to four)
      // when ne12 and ne13 are one.
      } else if ((dst->ne[1] == 1 || (dst->ne[1] <= ggml_vk_mmv_max_cols() && src1->ne[2] * src1->ne[3] == 1)) &&
-@@ -10254,8 +10264,8 @@ static void ggml_vk_mul_mat_id_q_f16(ggml_backend_vk_context * ctx, vk_context&
-     const uint32_t nbi1 = ids->nb[1];
-     const uint32_t nbi2 = ids->nb[2];
- 
--    const uint64_t ne20 = dst->ne[0];
--    const uint64_t ne21 = dst->ne[1];
-+    const uint64_t ne20 = dst->ne[swap_inputs ? 1 : 0];
-+    const uint64_t ne21 = dst->ne[swap_inputs ? 0 : 1];
-     // const uint64_t ne22 = dst->ne[2];
-     // const uint64_t ne23 = dst->ne[3];
- 
-@@ -10618,8 +10628,8 @@ static void ggml_vk_mul_mat_vec_id_q_f16(ggml_backend_vk_context * ctx, vk_conte
-     const uint64_t nei1 = ids->ne[1];
-     const uint32_t nbi1 = (uint32_t)(ids->nb[1] / sizeof(int));
- 
--    const uint64_t ne20 = dst->ne[0];
--    const uint64_t ne21 = dst->ne[1];
-+    const uint64_t ne20 = dst->ne[swap_inputs ? 1 : 0];
-+    const uint64_t ne21 = dst->ne[swap_inputs ? 0 : 1];
-     // const uint64_t ne22 = dst->ne[2];
-     // const uint64_t ne23 = dst->ne[3];
- 
 -- 
 2.55.0
 
